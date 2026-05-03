@@ -77,6 +77,17 @@ src/
 │       └── resolver.ts             # templateId → mock 매핑
 ```
 
+## 프롬프트 ↔ UI 스텝 매핑
+
+| UI 스텝 | 컴포넌트 | 프롬프트 템플릿 | 설명 |
+|---------|----------|----------------|------|
+| Step 1 | StepStockInput | — | 사용자 입력만, 프롬프트 불필요 |
+| Step 2 | StepAngleSelect | `step1-stock-angles` | 종목명 → 분석 꼭지 5~7개 생성 |
+| Step 3 | StepAnalysisReview | `step2-angle-analysis` | 선택된 꼭지 → 분석 결과 생성 |
+| Step 4 | StepTermSelect | `step3-term-extraction` | 분석 결과 → 어려운 용어 추출 |
+| Step 5 | StepFormatSelect | — | 출력 형식 선택만, 프롬프트 불필요 |
+| Step 6 | StepFinalOutput | `step4-format-output` | 선택된 형식으로 최종 결과물 생성 |
+
 ## 의존성
 
 ```json
@@ -89,27 +100,31 @@ devDependencies는 Next.js 기본 + vitest + testing-library
 
 ## 구현 순서
 
-### Phase 1: Setup
+### Impl-1: Setup (제품 Phase 1)
+
 1. 타입 정의 (wizard.ts, stock.ts)
 2. 프롬프트 파이프라인 (types → templates → registry → executor)
 3. Mock 데이터
 4. Zustand 스토어
 
-### Phase 2: UI
+### Impl-2: UI (제품 Phase 1)
+
 5. UI 기본 컴포넌트 (Button, Card, Chip, ProgressBar, TextInput)
 6. WizardShell (진행바 + 네비게이션)
 7. Step 1~6 컴포넌트
 8. 위자드 페이지 연결
 
-### Phase 3: Polish
+### Impl-3: Polish (제품 Phase 1)
+
 9. 반응형 디자인
 10. 애니메이션 (스텝 전환)
-11. 테스트 작성
+11. 테스트 작성 (스토어, 프롬프트 파이프라인, 위자드 컴포넌트)
 
-### Phase 4: Data (Phase 2 of product)
+### Impl-4: Data (제품 Phase 2~3)
+
 12. API 라우트 구현
-13. 웹 검색 연결
-14. Claude API 연결
+13. 웹 검색 연결 (제품 Phase 2)
+14. Claude API 연결 (제품 Phase 3)
 
 ## 기술적 결정
 

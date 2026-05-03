@@ -9,7 +9,7 @@
 - **Framework**: Next.js 15 (App Router)
 - **Language**: TypeScript (strict mode)
 - **Styling**: Tailwind CSS v4
-- **State Management**: Zustand
+- **State Management**: Zustand v5
 - **Testing**: Vitest + React Testing Library
 - **Package Manager**: pnpm
 - **Deployment**: Vercel
