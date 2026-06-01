@@ -9,6 +9,7 @@ interface StockEntry {
   stockName: string;
   stockCode: string;
   date: string;
+  href?: string; // 지정 시 이 경로로 이동 (세션은 /sessions/[id])
 }
 
 interface SidebarProps {
@@ -36,9 +37,39 @@ function setFavorites(favs: string[]) {
 export function Sidebar({ entries, isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const [favorites, setFavoritesState] = useState<string[]>([]);
+  const [sessionEntries, setSessionEntries] = useState<StockEntry[]>([]);
 
   useEffect(() => {
     setFavoritesState(getFavorites());
+  }, []);
+
+  // Supabase에 저장된 완료 세션(웹 /auto 분석)을 최근 분석에 합친다.
+  // 분석 완료 직후 'bokstock:session-saved' 이벤트로 즉시 갱신.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSessions() {
+      try {
+        const res = await fetch('/api/sessions/recent');
+        if (!res.ok) return;
+        const { sessions } = await res.json();
+        if (cancelled) return;
+        setSessionEntries(
+          (sessions as Array<{ id: string; stockName: string; date: string }>).map((s) => ({
+            slug: s.id,
+            stockName: s.stockName,
+            stockCode: '',
+            date: s.date,
+            href: `/sessions/${s.id}`,
+          })),
+        );
+      } catch { /* 무시 */ }
+    }
+    loadSessions();
+    window.addEventListener('bokstock:session-saved', loadSessions);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bokstock:session-saved', loadSessions);
+    };
   }, []);
 
   const toggleFavorite = (slug: string) => {
@@ -49,8 +80,10 @@ export function Sidebar({ entries, isOpen, onClose }: SidebarProps) {
     setFavorites(next);
   };
 
-  const favoriteEntries = entries.filter((e) => favorites.includes(e.slug));
-  const recentEntries = entries.slice(0, 10);
+  // Supabase 세션 + MDX 항목 병합 (날짜 내림차순)
+  const allEntries = [...sessionEntries, ...entries].sort((a, b) => b.date.localeCompare(a.date));
+  const favoriteEntries = allEntries.filter((e) => favorites.includes(e.slug));
+  const recentEntries = allEntries.slice(0, 10);
 
   return (
     <>
@@ -118,7 +151,7 @@ export function Sidebar({ entries, isOpen, onClose }: SidebarProps) {
                   <SidebarItem
                     key={`fav-${e.slug}`}
                     entry={e}
-                    isActive={pathname === `/stocks/${e.slug}`}
+                    currentPath={pathname}
                     isFavorite={true}
                     onToggleFavorite={() => toggleFavorite(e.slug)}
                     onClick={onClose}
@@ -139,9 +172,9 @@ export function Sidebar({ entries, isOpen, onClose }: SidebarProps) {
               <ul className="space-y-0.5">
                 {recentEntries.map((e) => (
                   <SidebarItem
-                    key={e.slug}
+                    key={e.href ?? e.slug}
                     entry={e}
-                    isActive={pathname === `/stocks/${e.slug}`}
+                    currentPath={pathname}
                     isFavorite={favorites.includes(e.slug)}
                     onToggleFavorite={() => toggleFavorite(e.slug)}
                     onClick={onClose}
@@ -159,21 +192,23 @@ export function Sidebar({ entries, isOpen, onClose }: SidebarProps) {
 /** 사이드바 항목 */
 function SidebarItem({
   entry,
-  isActive,
+  currentPath,
   isFavorite,
   onToggleFavorite,
   onClick,
 }: {
   entry: StockEntry;
-  isActive: boolean;
+  currentPath: string;
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onClick: () => void;
 }) {
+  const href = entry.href ?? `/stocks/${entry.slug}`;
+  const isActive = currentPath === href;
   return (
     <li className="group relative">
       <Link
-        href={`/stocks/${entry.slug}`}
+        href={href}
         className={`flex items-center rounded-lg px-3 py-2 text-sm no-underline transition-colors ${
           isActive
             ? 'bg-zinc-200 text-zinc-900 font-medium'

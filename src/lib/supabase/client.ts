@@ -1,5 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
+/** Supabase 환경변수 설정 여부 */
+export function hasSupabase(): boolean {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+}
+
 /** 서버 사이드 Supabase 클라이언트 */
 export function getSupabase() {
   const url = process.env.SUPABASE_URL;

@@ -119,6 +119,8 @@ export default function AutoPage() {
         output: c.output,
       });
       setProgress(null);
+      // 사이드바 "최근 분석"이 새 세션을 즉시 반영하도록 알림
+      window.dispatchEvent(new Event('bokstock:session-saved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 에러');
       setProgress(null);
