@@ -56,13 +56,32 @@ async function callWithSearch(system: string, prompt: string) {
   });
 }
 
-async function callSimple(system: string, prompt: string) {
+async function callSimple(system: string, prompt: string, maxTokens = 4096) {
   return anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     system,
     messages: [{ role: 'user', content: prompt }],
   });
+}
+
+// 카드뉴스 파싱이 끝내 실패해도 분석 결과로 최소한의 카드를 구성해 사용자에게 결과를 보여준다.
+function buildFallbackCards(
+  stockName: string,
+  analysis: Array<{ title: string; summary: string; keyPoints: string[]; sentiment: string }>,
+  terms: Array<{ word: string; definition: string }>,
+) {
+  const cards: Array<Record<string, unknown>> = [
+    { type: 'cover', title: `${stockName} 분석`, content: `${stockName}에 대한 자동 분석 결과입니다.`, keyPoints: [], sentiment: 'neutral', terms: [] },
+  ];
+  for (const a of analysis) {
+    cards.push({ type: 'analysis', title: a.title, content: a.summary, keyPoints: a.keyPoints ?? [], sentiment: a.sentiment ?? 'neutral', terms: [] });
+  }
+  if (terms.length > 0) {
+    cards.push({ type: 'terms', title: '주요 용어', content: '', keyPoints: terms.map((t) => `${t.word}: ${t.definition}`), sentiment: 'neutral', terms });
+  }
+  cards.push({ type: 'summary', title: '요약', content: `${stockName} 분석 요약`, keyPoints: analysis.map((a) => a.title), sentiment: 'neutral', terms: [] });
+  return cards;
 }
 
 export const maxDuration = 300;
@@ -163,6 +182,7 @@ export async function POST(request: NextRequest) {
             const synthResp = await callSimple(
               '여러 번 수행된 분석 각도를 종합하세요. 중복=confidence 높게. 반드시 JSON 배열로만 응답하세요. 다른 텍스트 금지.',
               `다음 ${rawAngles.length}개 결과를 종합하세요:\n\n${rawAngles.map((r, i) => `=== 패스 ${i + 1} ===\n${JSON.stringify(r, null, 2)}`).join('\n\n')}\n\nJSON 배열로만 응답: [{"id":"...","label":"...","description":"...","source":"news|dart","importance":숫자,"confidence":1~5}]`,
+              8192,
             );
             const { text } = extractTextAndSources(synthResp);
             angles = parseJSON(text) as typeof angles;
@@ -239,6 +259,7 @@ JSON 배열로만 응답: [{"angleId":"...","title":"...","summary":"...","keyPo
             const synthResp = await callSimple(
               '여러 번 수행된 분석 결과를 종합하세요. 중복 포인트=confidence 높게. 반드시 JSON 배열로만 응답하세요. 다른 텍스트 금지.',
               `다음 ${rawAnalysis.length}개 결과를 종합하세요:\n\n${rawAnalysis.map((r, i) => `=== 패스 ${i + 1} ===\n${JSON.stringify(r, null, 2)}`).join('\n\n')}\n\nJSON 배열로만 응답: [{"angleId":"...","title":"...","summary":"...","keyPoints":["..."],"sentiment":"positive|neutral|negative","confidence":1~5}]`,
+              8192,
             );
             const { text } = extractTextAndSources(synthResp);
             analysis = parseJSON(text) as typeof analysis;
@@ -263,12 +284,18 @@ JSON 배열로만 응답: [{"angleId":"...","title":"...","summary":"...","keyPo
         send('progress', { step: 4, total: 5, label: '전문 용어 추출 중...' });
 
         // ─── Step 4: 용어 추출 ───
-        const termsResp = await callSimple(
-          `금융 전문 용어를 추출하세요. JSON 배열로만 응답: [{"id":"...","word":"...","definition":"...","analogy":"..."}]`,
-          `분석 결과:\n${JSON.stringify(analysis, null, 2)}\n\n일반인이 어려워할 전문 용어를 추출하세요.`,
-        );
-        const { text: termsText } = extractTextAndSources(termsResp);
-        const terms = parseJSON(termsText) as Array<{ id: string; word: string; definition: string; analogy: string }>;
+        // 용어는 부가 정보이므로 파싱이 실패해도 전체 파이프라인을 중단하지 않고 건너뛴다.
+        let terms: Array<{ id: string; word: string; definition: string; analogy: string }> = [];
+        try {
+          const termsResp = await callSimple(
+            `금융 전문 용어를 추출하세요. JSON 배열로만 응답: [{"id":"...","word":"...","definition":"...","analogy":"..."}]`,
+            `분석 결과:\n${JSON.stringify(analysis, null, 2)}\n\n일반인이 어려워할 전문 용어를 추출하세요.`,
+          );
+          const { text: termsText } = extractTextAndSources(termsResp);
+          terms = parseJSON(termsText) as typeof terms;
+        } catch (termsErr) {
+          console.error('용어 추출 파싱 실패, 용어 생략:', termsErr);
+        }
 
         if (sessionId && hasSupabase()) {
           await saveTerms(sessionId, terms as never[], terms.map((t) => t.id)).catch(() => {});
@@ -277,14 +304,34 @@ JSON 배열로만 응답: [{"angleId":"...","title":"...","summary":"...","keyPo
         send('progress', { step: 5, total: 5, label: '카드뉴스 생성 중...' });
 
         // ─── Step 5: 카드뉴스 생성 ───
-        const outputResp = await callSimple(
-          `콘텐츠 제작 전문가. 분석 결과를 카드뉴스로 변환. JSON 배열로만 응답.
+        // 각도가 많으면 출력이 길어져 4096 토큰을 넘겨 잘리고 JSON 파싱이 실패한다.
+        // 토큰을 넉넉히 주고, 실패 시 더 엄격한 지시로 1회 재시도, 그래도 안 되면 분석 결과로 폴백 카드를 만든다.
+        const cardSystem = `콘텐츠 제작 전문가. 분석 결과를 카드뉴스로 변환. JSON 배열로만 응답.
 [{"type":"cover|analysis|terms|summary","title":"...","content":"...","keyPoints":[...],"sentiment":"...","terms":[...]}]
-구성: 표지(1) + 꼭지별 분석(각 1장) + 용어(1장) + 요약(1장)`,
-          `종목명: ${stockName}\n출력 형식: card-news\n분석 결과:\n${JSON.stringify(analysis, null, 2)}\n용어:\n${JSON.stringify(terms, null, 2)}\n\n카드뉴스로 변환하세요.`,
-        );
-        const { text: outputText } = extractTextAndSources(outputResp);
-        const output = parseJSON(outputText);
+구성: 표지(1) + 꼭지별 분석(각 1장) + 용어(1장) + 요약(1장)`;
+        const cardPrompt = `종목명: ${stockName}\n출력 형식: card-news\n분석 결과:\n${JSON.stringify(analysis, null, 2)}\n용어:\n${JSON.stringify(terms, null, 2)}\n\n카드뉴스로 변환하세요.`;
+
+        async function generateCards(strict: boolean) {
+          const sys = strict
+            ? cardSystem + '\n\n반드시 완결된(잘리지 않은) JSON 배열만 출력하세요. 설명·마크다운·코드블록 금지.'
+            : cardSystem;
+          const resp = await callSimple(sys, cardPrompt, 8192);
+          const { text } = extractTextAndSources(resp);
+          return parseJSON(text);
+        }
+
+        let output: unknown;
+        try {
+          output = await generateCards(false);
+        } catch (firstErr) {
+          console.error('카드뉴스 파싱 1차 실패, 엄격 모드로 재시도:', firstErr);
+          try {
+            output = await generateCards(true);
+          } catch (secondErr) {
+            console.error('카드뉴스 재시도도 실패, 분석 결과로 폴백:', secondErr);
+            output = buildFallbackCards(stockName, analysis, terms);
+          }
+        }
 
         if (sessionId && hasSupabase()) {
           await saveFinalOutput(sessionId, 'card-news', output).catch(() => {});
