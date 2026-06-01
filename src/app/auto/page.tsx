@@ -37,14 +37,14 @@ function formatDate(yyyymmdd: string): string {
   return `${yyyymmdd.slice(0, 4)}.${yyyymmdd.slice(4, 6)}.${yyyymmdd.slice(6, 8)}`;
 }
 
+// 파이프라인을 3개의 짧은 함수 호출로 분리(각 <300초). 클라이언트가 순차 호출한다.
 const STEP_LABELS = [
   '', // 0 (미사용)
-  'DART 공시',
   '각도 생성',
   '상세 분석',
-  '용어 추출',
   '카드뉴스',
 ];
+const TOTAL_STEPS = 3;
 
 export default function AutoPage() {
   const [stockName, setStockName] = useState('');
@@ -57,69 +57,64 @@ export default function AutoPage() {
 
   const handleRun = useCallback(async () => {
     if (!stockName.trim()) return;
+    const name = stockName.trim();
 
     setIsLoading(true);
     setError(null);
     setResult(null);
     setDartStatus(null);
-    setProgress({ step: 0, total: 5, label: '분석 준비 중...' });
+    setProgress({ step: 1, total: TOTAL_STEPS, label: 'DART 조회 + 분석 각도 생성 중... (웹검색 멀티패스)' });
 
-    try {
-      const res = await fetch('/api/auto-analyze', {
+    // 각 단계는 별도 함수 호출(별도 라우트)이라 한 호출이 300초를 넘지 않는다.
+    async function postJSON(url: string, body: unknown) {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockName: stockName.trim(), passCount }),
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data: { error?: string } & Record<string, unknown>;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`서버 에러 (${res.status})`);
+      }
+      if (!res.ok) throw new Error(data.error || `서버 에러 (${res.status})`);
+      return data;
+    }
+
+    try {
+      // ─── Step 1: DART + 각도 생성 ───
+      const a = await postJSON('/api/auto-analyze/angles', { stockName: name, passCount });
+      setDartStatus(a.dart as DartStatus);
+
+      // ─── Step 2: 상세 분석 ───
+      setProgress({ step: 2, total: TOTAL_STEPS, label: '상세 분석 진행 중... (웹검색 멀티패스)' });
+      const d = await postJSON('/api/auto-analyze/details', {
+        stockName: name,
+        selectedAngles: a.selectedAngles,
+        passCount,
+        sessionId: a.sessionId,
       });
 
-      if (!res.ok) {
-        const text = await res.text();
-        let message = '분석 실패';
-        try { message = JSON.parse(text).error || message; } catch { message = `서버 에러 (${res.status})`; }
-        throw new Error(message);
-      }
+      // ─── Step 3: 용어 + 카드뉴스 ───
+      setProgress({ step: 3, total: TOTAL_STEPS, label: '용어 추출 + 카드뉴스 생성 중...' });
+      const c = await postJSON('/api/auto-analyze/cards', {
+        stockName: name,
+        analysis: d.analysis,
+        sessionId: a.sessionId,
+      });
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('스트림을 읽을 수 없습니다');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // SSE 메시지 파싱
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        let eventType = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7);
-          } else if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-
-            if (eventType === 'progress') {
-              setProgress((prev) => ({
-                ...data,
-                subDone: data.step === prev?.step ? prev?.subDone : undefined,
-                subTotal: data.step === prev?.step ? prev?.subTotal : undefined,
-              }));
-            } else if (eventType === 'sub-progress') {
-              setProgress((prev) => prev ? { ...prev, subDone: data.done, subTotal: data.total } : prev);
-            } else if (eventType === 'dart') {
-              setDartStatus(data);
-            } else if (eventType === 'result') {
-              setResult(data);
-              setProgress(null);
-            } else if (eventType === 'error') {
-              throw new Error(data.error);
-            }
-          }
-        }
-      }
+      setResult({
+        sessionId: a.sessionId as string | undefined,
+        stockName: name,
+        angles: a.angles as AutoResult['angles'],
+        selectedAngles: a.selectedAngles as AutoResult['selectedAngles'],
+        analysis: d.analysis as AutoResult['analysis'],
+        terms: c.terms as AutoResult['terms'],
+        output: c.output,
+      });
+      setProgress(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 에러');
       setProgress(null);
