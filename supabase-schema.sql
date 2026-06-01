@@ -106,3 +106,13 @@ create policy "allow_all" on analysis_results for all using (true) with check (t
 create policy "allow_all" on terms for all using (true) with check (true);
 create policy "allow_all" on final_outputs for all using (true) with check (true);
 create policy "allow_all" on dart_cache for all using (true) with check (true);
+
+-- 테이블 권한 부여 (RLS 정책과 별개로 GRANT가 없으면 42501 permission denied 발생)
+-- SQL Editor에서 create table만으로는 anon/service_role에 권한이 자동 부여되지 않을 수 있다.
+grant usage on schema public to anon, authenticated, service_role;
+grant all on all tables in schema public to anon, authenticated, service_role;
+grant all on all sequences in schema public to anon, authenticated, service_role;
+
+-- 이후 추가되는 테이블/시퀀스에도 자동 부여
+alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
