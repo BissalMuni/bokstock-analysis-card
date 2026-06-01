@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { AutoResultView } from '@/components/auto/AutoResultView';
@@ -15,21 +15,38 @@ interface AutoResult {
   output: unknown;
 }
 
+interface ProgressState {
+  step: number;
+  total: number;
+  label: string;
+  subDone?: number;
+  subTotal?: number;
+}
+
+const STEP_LABELS = [
+  '', // 0 (미사용)
+  'DART 공시',
+  '각도 생성',
+  '상세 분석',
+  '용어 추출',
+  '카드뉴스',
+];
+
 export default function AutoPage() {
   const [stockName, setStockName] = useState('');
   const [passCount, setPassCount] = useState(3);
   const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState('');
+  const [progress, setProgress] = useState<ProgressState | null>(null);
   const [result, setResult] = useState<AutoResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleRun = async () => {
+  const handleRun = useCallback(async () => {
     if (!stockName.trim()) return;
 
     setIsLoading(true);
     setError(null);
     setResult(null);
-    setProgress('DART 공시 조회 + 멀티패스 분석 시작...');
+    setProgress({ step: 0, total: 5, label: '분석 준비 중...' });
 
     try {
       const res = await fetch('/api/auto-analyze', {
@@ -39,20 +56,59 @@ export default function AutoPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || '분석 실패');
+        const text = await res.text();
+        let message = '분석 실패';
+        try { message = JSON.parse(text).error || message; } catch { message = `서버 에러 (${res.status})`; }
+        throw new Error(message);
       }
 
-      const data = await res.json();
-      setResult(data);
-      setProgress('');
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('스트림을 읽을 수 없습니다');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE 메시지 파싱
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let eventType = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7);
+          } else if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6));
+
+            if (eventType === 'progress') {
+              setProgress((prev) => ({
+                ...data,
+                subDone: data.step === prev?.step ? prev?.subDone : undefined,
+                subTotal: data.step === prev?.step ? prev?.subTotal : undefined,
+              }));
+            } else if (eventType === 'sub-progress') {
+              setProgress((prev) => prev ? { ...prev, subDone: data.done, subTotal: data.total } : prev);
+            } else if (eventType === 'result') {
+              setResult(data);
+              setProgress(null);
+            } else if (eventType === 'error') {
+              throw new Error(data.error);
+            }
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 에러');
-      setProgress('');
+      setProgress(null);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [stockName, passCount]);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
@@ -105,17 +161,68 @@ export default function AutoPage() {
         </div>
       </Card>
 
-      {/* 로딩 상태 */}
-      {isLoading && (
+      {/* 진행 상황 */}
+      {isLoading && progress && (
         <Card className="mb-6">
-          <div className="flex items-center gap-3">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900" />
-            <div>
-              <p className="text-sm font-medium text-zinc-900">{progress}</p>
-              <p className="text-xs text-zinc-500 mt-1">
-                멀티패스 {passCount}회 × 웹검색 — 1~3분 소요될 수 있습니다
-              </p>
+          <div className="space-y-4">
+            {/* 스텝 진행 바 */}
+            <div className="flex items-center gap-1">
+              {Array.from({ length: progress.total }, (_, i) => {
+                const stepNum = i + 1;
+                const isCompleted = stepNum < progress.step;
+                const isCurrent = stepNum === progress.step;
+                return (
+                  <div key={stepNum} className="flex-1 flex flex-col items-center gap-1.5">
+                    <div
+                      className={`h-2 w-full rounded-full transition-all duration-500 ${
+                        isCompleted
+                          ? 'bg-emerald-500'
+                          : isCurrent
+                            ? 'bg-zinc-800 animate-pulse'
+                            : 'bg-zinc-200'
+                      }`}
+                    />
+                    <span
+                      className={`text-[10px] leading-none ${
+                        isCurrent
+                          ? 'font-semibold text-zinc-900'
+                          : isCompleted
+                            ? 'text-emerald-600'
+                            : 'text-zinc-400'
+                      }`}
+                    >
+                      {STEP_LABELS[stepNum]}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
+
+            {/* 현재 작업 설명 */}
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-zinc-900 truncate">{progress.label}</p>
+                {progress.subDone !== undefined && progress.subTotal !== undefined && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <div className="h-1 flex-1 rounded-full bg-zinc-200 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-zinc-700 transition-all duration-300"
+                        style={{ width: `${(progress.subDone / progress.subTotal) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-zinc-500 shrink-0">
+                      {progress.subDone}/{progress.subTotal}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 전체 진행률 텍스트 */}
+            <p className="text-xs text-zinc-500 text-right">
+              {progress.step}/{progress.total} 단계 · 멀티패스 {passCount}회
+            </p>
           </div>
         </Card>
       )}
