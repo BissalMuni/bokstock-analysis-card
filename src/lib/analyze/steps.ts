@@ -137,6 +137,14 @@ function buildFallbackCards(stockName: string, analysis: AnalysisItem[], terms: 
   return cards;
 }
 
+// ─── Step 0: DART 상태만 빠르게 조회 (UI 배지 즉시 표시용) ───
+// DART 자체는 ~0.3초로 빠른데, 각도 생성(웹검색 1~3분)과 한 호출에 묶이면
+// 사용자에게는 "DART 조회"가 오래 걸리는 것처럼 보인다. 분리해 배지를 먼저 띄운다.
+export async function fetchDartStatus(stockName: string): Promise<DartStatus> {
+  const dartData = await enrichWithDart(stockName);
+  return toDartStatus(dartData);
+}
+
 // ─── Step 1: DART + 각도 생성 + 선정 ────────────────────────
 export interface AnglesResult {
   sessionId?: string;

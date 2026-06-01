@@ -63,7 +63,7 @@ export default function AutoPage() {
     setError(null);
     setResult(null);
     setDartStatus(null);
-    setProgress({ step: 1, total: TOTAL_STEPS, label: 'DART 조회 + 분석 각도 생성 중... (웹검색 멀티패스)' });
+    setProgress({ step: 0, total: TOTAL_STEPS, label: 'DART 전자공시 조회 중...' });
 
     // 각 단계는 별도 함수 호출(별도 라우트)이라 한 호출이 300초를 넘지 않는다.
     async function postJSON(url: string, body: unknown) {
@@ -84,12 +84,16 @@ export default function AutoPage() {
     }
 
     try {
-      // ─── Step 1: DART + 각도 생성 ───
+      // ─── Step 0: DART 조회 (빠름, 배지 즉시 표시) ───
+      const dart = await postJSON('/api/auto-analyze/dart', { stockName: name });
+      setDartStatus(dart as unknown as DartStatus);
+
+      // ─── Step 1: 각도 생성 (웹검색 멀티패스, 1~3분) ───
+      setProgress({ step: 1, total: TOTAL_STEPS, label: '분석 각도 생성 중... (웹검색 멀티패스, 1~3분 소요)' });
       const a = await postJSON('/api/auto-analyze/angles', { stockName: name, passCount });
-      setDartStatus(a.dart as DartStatus);
 
       // ─── Step 2: 상세 분석 ───
-      setProgress({ step: 2, total: TOTAL_STEPS, label: '상세 분석 진행 중... (웹검색 멀티패스)' });
+      setProgress({ step: 2, total: TOTAL_STEPS, label: '상세 분석 진행 중... (웹검색 멀티패스, 1~3분 소요)' });
       const d = await postJSON('/api/auto-analyze/details', {
         stockName: name,
         selectedAngles: a.selectedAngles,
