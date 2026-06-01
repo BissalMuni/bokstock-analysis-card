@@ -28,6 +28,13 @@ interface DartStatus {
   corpName: string | null;
   stockCode: string | null;
   disclosureCount: number;
+  disclosures: Array<{ reportNm: string; receiptDate: string; url: string }>;
+}
+
+// DART 접수일자(YYYYMMDD) → YYYY.MM.DD 표시
+function formatDate(yyyymmdd: string): string {
+  if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd;
+  return `${yyyymmdd.slice(0, 4)}.${yyyymmdd.slice(4, 6)}.${yyyymmdd.slice(6, 8)}`;
 }
 
 const STEP_LABELS = [
@@ -260,6 +267,25 @@ export default function AutoPage() {
               )}
             </div>
           </div>
+
+          {/* 불러온 공시 목록 */}
+          {dartStatus.found && dartStatus.disclosures.length > 0 && (
+            <ul className="mt-3 divide-y divide-emerald-100 border-t border-emerald-100 pt-2">
+              {dartStatus.disclosures.map((d, i) => (
+                <li key={i} className="py-1.5">
+                  <a
+                    href={d.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-baseline gap-2 text-sm text-emerald-900 hover:underline"
+                  >
+                    <span className="shrink-0 font-mono text-xs text-emerald-600">{formatDate(d.receiptDate)}</span>
+                    <span className="min-w-0 truncate">{d.reportNm}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       )}
 

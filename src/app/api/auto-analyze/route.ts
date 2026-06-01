@@ -122,12 +122,17 @@ export async function POST(request: NextRequest) {
         const dartContext = dartData ? buildDartContext(dartData) : '';
         const dartSources = dartData ? buildDartSources(dartData.recentDisclosures) : [];
 
-        // DART 조회 결과를 화면에 표시할 수 있도록 상태 전송
+        // DART 조회 결과를 화면에 표시할 수 있도록 상태 + 공시 목록 전송
         send('dart', {
           found: !!dartData,
           corpName: dartData?.company?.corp_name ?? null,
           stockCode: dartData?.stockCode ?? null,
           disclosureCount: dartData?.recentDisclosures.length ?? 0,
+          disclosures: (dartData?.recentDisclosures ?? []).map((d) => ({
+            reportNm: d.report_nm,
+            receiptDate: d.rcept_dt,
+            url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}`,
+          })),
         });
 
         send('progress', { step: 2, total: 5, label: `분석 각도 생성 중... (${passCount}회 멀티패스 + 웹검색)` });
