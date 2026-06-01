@@ -23,6 +23,13 @@ interface ProgressState {
   subTotal?: number;
 }
 
+interface DartStatus {
+  found: boolean;
+  corpName: string | null;
+  stockCode: string | null;
+  disclosureCount: number;
+}
+
 const STEP_LABELS = [
   '', // 0 (미사용)
   'DART 공시',
@@ -37,6 +44,7 @@ export default function AutoPage() {
   const [passCount, setPassCount] = useState(3);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<ProgressState | null>(null);
+  const [dartStatus, setDartStatus] = useState<DartStatus | null>(null);
   const [result, setResult] = useState<AutoResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +54,7 @@ export default function AutoPage() {
     setIsLoading(true);
     setError(null);
     setResult(null);
+    setDartStatus(null);
     setProgress({ step: 0, total: 5, label: '분석 준비 중...' });
 
     try {
@@ -93,6 +102,8 @@ export default function AutoPage() {
               }));
             } else if (eventType === 'sub-progress') {
               setProgress((prev) => prev ? { ...prev, subDone: data.done, subTotal: data.total } : prev);
+            } else if (eventType === 'dart') {
+              setDartStatus(data);
             } else if (eventType === 'result') {
               setResult(data);
               setProgress(null);
@@ -223,6 +234,31 @@ export default function AutoPage() {
             <p className="text-xs text-zinc-500 text-right">
               {progress.step}/{progress.total} 단계 · 멀티패스 {passCount}회
             </p>
+          </div>
+        </Card>
+      )}
+
+      {/* DART 조회 결과 표시 (분석 중·완료 모두 유지) */}
+      {dartStatus && (
+        <Card className={`mb-6 ${dartStatus.found ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+          <div className="flex items-center gap-3">
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm ${dartStatus.found ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-white'}`}>
+              {dartStatus.found ? '✓' : '!'}
+            </span>
+            <div className="min-w-0 text-sm">
+              {dartStatus.found ? (
+                <p className="text-emerald-800">
+                  <span className="font-semibold">DART 전자공시 연동됨</span>
+                  {dartStatus.corpName && <> · {dartStatus.corpName}</>}
+                  {dartStatus.stockCode && <span className="text-emerald-600"> ({dartStatus.stockCode})</span>}
+                  {' · '}공시 <span className="font-semibold">{dartStatus.disclosureCount}건</span> 반영
+                </p>
+              ) : (
+                <p className="text-amber-800">
+                  <span className="font-semibold">DART 데이터 없음</span> · 웹검색 결과만으로 분석합니다
+                </p>
+              )}
+            </div>
           </div>
         </Card>
       )}

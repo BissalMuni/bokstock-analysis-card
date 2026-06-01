@@ -69,8 +69,13 @@ export const maxDuration = 300;
 // DART는 한국 정부 인프라라 미국 리전에서 호출하면 느리거나 멈춘다. 서울 리전에서 실행한다.
 export const preferredRegion = 'icn1';
 
+// 각도 선정 기준: 중요도가 이 값 이상이면 모두 선택 (개수 고정 X)
+const IMPORTANCE_THRESHOLD = 7;
+// 토큰/시간 폭주 방지를 위한 안전 상한
+const MAX_ANGLES = 10;
+
 export async function POST(request: NextRequest) {
-  const { stockName, passCount = 3, angleCount = 5 } = await request.json();
+  const { stockName, passCount = 3 } = await request.json();
 
   if (!stockName) {
     return Response.json({ error: '종목명이 필요합니다' }, { status: 400 });
@@ -97,6 +102,14 @@ export async function POST(request: NextRequest) {
         const dartData = await enrichWithDart(stockName);
         const dartContext = dartData ? buildDartContext(dartData) : '';
         const dartSources = dartData ? buildDartSources(dartData.recentDisclosures) : [];
+
+        // DART 조회 결과를 화면에 표시할 수 있도록 상태 전송
+        send('dart', {
+          found: !!dartData,
+          corpName: dartData?.company?.corp_name ?? null,
+          stockCode: dartData?.stockCode ?? null,
+          disclosureCount: dartData?.recentDisclosures.length ?? 0,
+        });
 
         send('progress', { step: 2, total: 5, label: `분석 각도 생성 중... (${passCount}회 멀티패스 + 웹검색)` });
 
@@ -159,9 +172,16 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 상위 N개 자동 선택
-        const sorted = [...angles].sort((a, b) => b.importance - a.importance);
-        const selectedAngles = sorted.slice(0, angleCount);
+        // 중요도 임계값 기반 선택 (고정 N개 한정 X)
+        // 1) 중요도 내림차순, 동점이면 신뢰도(멀티패스 일치도) 높은 순
+        // 2) 임계값 이상을 모두 선택하되, 토큰/시간 보호를 위해 안전 상한을 둔다
+        const sorted = [...angles].sort((a, b) => {
+          if (b.importance !== a.importance) return b.importance - a.importance;
+          return (b.confidence ?? 0) - (a.confidence ?? 0);
+        });
+        const qualified = sorted.filter((a) => a.importance >= IMPORTANCE_THRESHOLD);
+        // 임계값을 넘는 각도가 하나도 없으면 상위 일부라도 분석한다
+        const selectedAngles = (qualified.length > 0 ? qualified : sorted).slice(0, MAX_ANGLES);
         const selectedIds = selectedAngles.map((a) => a.id);
 
         if (sessionId && hasSupabase()) {
