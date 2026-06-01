@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dart:corp-map": "node scripts/build-corp-map.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

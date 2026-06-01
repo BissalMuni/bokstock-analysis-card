@@ -8,6 +8,9 @@ import {
   type DisclosureListResponse,
   type DisclosureType,
 } from './types';
+// 빌드 시 생성한 상장사 목록(상장사만, ~300KB). 런타임 3.4MB 다운로드를 대체한다.
+// 갱신: pnpm dart:corp-map (scripts/build-corp-map.mjs)
+import staticCorpMap from './corp-map.json';
 
 const DART_BASE = 'https://opendart.fss.or.kr/api';
 
@@ -91,16 +94,13 @@ async function fetchCorpCodeList(): Promise<CorpCodeEntry[]> {
   return entries;
 }
 
-/** 종목명으로 고유번호 검색 (상장사 우선) */
-export async function searchCorp(query: string): Promise<CorpSearchResult[]> {
-  const entries = await fetchCorpCodeList();
-  const q = query.toLowerCase().trim();
-
-  // 상장사만 필터 (stock_code가 있는 것)
-  const listed = entries.filter((e) => e.stock_code && e.stock_code.trim() !== '');
-
-  // 정확 매치 → 포함 매치 순으로 정렬
-  const results = listed
+/** 항목 배열에서 종목명으로 매칭 (정확 매치 → 포함 매치 순) */
+function matchCorp(
+  entries: Array<{ corp_code: string; corp_name: string; stock_code: string }>,
+  q: string,
+): CorpSearchResult[] {
+  return entries
+    .filter((e) => e.stock_code && e.stock_code.trim() !== '')
     .filter((e) => e.corp_name.toLowerCase().includes(q))
     .sort((a, b) => {
       const aExact = a.corp_name.toLowerCase() === q ? 0 : 1;
@@ -113,8 +113,19 @@ export async function searchCorp(query: string): Promise<CorpSearchResult[]> {
       corpName: e.corp_name,
       stockCode: e.stock_code,
     }));
+}
 
-  return results;
+/** 종목명으로 고유번호 검색 (상장사 우선) */
+export async function searchCorp(query: string): Promise<CorpSearchResult[]> {
+  const q = query.toLowerCase().trim();
+
+  // 1차: 번들된 정적 목록에서 조회 (네트워크 0회)
+  const fromStatic = matchCorp(staticCorpMap, q);
+  if (fromStatic.length > 0) return fromStatic;
+
+  // 2차: 정적 목록에 없으면(신규 상장 등) 전체 목록 다운로드 폴백
+  const entries = await fetchCorpCodeList();
+  return matchCorp(entries, q);
 }
 
 /** 기업개황 조회 */

@@ -13,6 +13,9 @@ import {
   saveTerms,
 } from '@/lib/supabase';
 
+// DART는 한국 정부 인프라라 미국 리전에서 호출하면 느리거나 멈춘다. 서울 리전에서 실행한다.
+export const preferredRegion = 'icn1';
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
