@@ -192,13 +192,23 @@ export async function enrichWithDart(stockName: string): Promise<DartEnrichedDat
 
     const { corpCode, stockCode } = results[0];
 
+    // DART list API는 bgn_de가 없으면 시작일을 종료일(=오늘)로 잡아 사실상 당일 공시만 조회된다.
+    // 최근 1년 범위를 명시해야 실제 공시가 조회된다.
+    const end = new Date();
+    const start = new Date();
+    start.setFullYear(start.getFullYear() - 1);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, '');
+
     // 2. 기업개황 + 최근 공시 동시 조회
     const [company, disclosures] = await Promise.all([
       getCompanyOverview(corpCode).catch(() => null),
       getDisclosures({
         corpCode,
         pageCount: 15,
-        disclosureType: 'A', // 정기공시 (사업보고서, 분기보고서 등)
+        startDate: fmt(start),
+        endDate: fmt(end),
+        // 정기공시(A)만 보면 분기·사업보고서뿐이라 희소하다.
+        // 유형 필터 없이 최근 공시를 폭넓게 가져온다(전체 유형, 날짜 내림차순).
       }).catch(() => []),
     ]);
 
