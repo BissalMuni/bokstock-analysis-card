@@ -11,10 +11,30 @@ import {
 
 const DART_BASE = 'https://opendart.fss.or.kr/api';
 
+// DART API는 간헐적으로 응답이 느리거나 멈춘다. 타임아웃 없이 fetch하면
+// 연결이 무한정 대기하며 서버리스 함수 전체 시간(300s)을 소진하므로 반드시 가드를 둔다.
+const DART_TIMEOUT_MS = 10_000;
+
 function getDartKey(): string {
   const key = process.env.DART_KEY;
   if (!key) throw new Error('DART_KEY 환경변수가 설정되지 않았습니다');
   return key;
+}
+
+/** AbortController 기반 타임아웃을 적용한 fetch. 시간 초과 시 명확한 에러를 던진다. */
+async function fetchWithTimeout(url: string, timeoutMs = DART_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`DART 요청 타임아웃 (${timeoutMs}ms 초과)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ─── 고유번호 캐시 (메모리) ─────────────────────────────────────
@@ -30,7 +50,8 @@ async function fetchCorpCodeList(): Promise<CorpCodeEntry[]> {
   }
 
   const url = `${DART_BASE}/corpCode.xml?crtfc_key=${getDartKey()}`;
-  const res = await fetch(url);
+  // 3.4MB 다운로드라 일반 호출보다 넉넉한 타임아웃을 준다.
+  const res = await fetchWithTimeout(url, 20_000);
 
   if (!res.ok) {
     throw new Error(`고유번호 목록 다운로드 실패: ${res.status}`);
@@ -99,7 +120,7 @@ export async function searchCorp(query: string): Promise<CorpSearchResult[]> {
 /** 기업개황 조회 */
 export async function getCompanyOverview(corpCode: string): Promise<CompanyOverview> {
   const url = `${DART_BASE}/company.json?crtfc_key=${getDartKey()}&corp_code=${corpCode}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
 
   if (!res.ok) {
     throw new Error(`기업개황 조회 실패: ${res.status}`);
@@ -134,7 +155,7 @@ export async function getDisclosures(options: {
   if (options.disclosureType) params.set('pblntf_ty', options.disclosureType);
 
   const url = `${DART_BASE}/list.json?${params.toString()}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
 
   if (!res.ok) {
     throw new Error(`공시검색 실패: ${res.status}`);

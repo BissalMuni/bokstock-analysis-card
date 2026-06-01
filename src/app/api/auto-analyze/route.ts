@@ -128,7 +128,10 @@ export async function POST(request: NextRequest) {
               if (sessionId && hasSupabase()) {
                 await saveMultipassRaw(sessionId, 'angles', i, parsed).catch(() => {});
               }
-            } catch { /* 파싱 실패 무시 */ }
+            } catch (parseErr) {
+              // 한 패스가 실패해도 나머지로 진행하되, 원인은 로그로 남긴다
+              console.error(`각도 패스 ${i} 파싱 실패:`, parseErr);
+            }
           }
         }
 
@@ -194,7 +197,10 @@ JSON 배열로만 응답: [{"angleId":"...","title":"...","summary":"...","keyPo
               if (sessionId && hasSupabase()) {
                 await saveMultipassRaw(sessionId, 'analysis', i, parsed).catch(() => {});
               }
-            } catch { /* 파싱 실패 무시 */ }
+            } catch (parseErr) {
+              // 한 패스가 실패해도 나머지로 진행하되, 원인은 로그로 남긴다
+              console.error(`분석 패스 ${i} 파싱 실패:`, parseErr);
+            }
           }
         }
 
